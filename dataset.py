@@ -3,10 +3,11 @@ import glob
 import pandas as pd
 import torch
 
-from PIL import Image
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from torch.utils.data import Dataset, DataLoader
 
-from config import get_default_config
+from configuration import get_default_config
 from utils import get_image_transform
 
 class ArchiveDataset(Dataset):

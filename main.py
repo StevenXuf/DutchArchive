@@ -1,4 +1,5 @@
 import fire
+import torch
 
 from tqdm import tqdm
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor, GenerationConfig, set_seed
@@ -6,7 +7,7 @@ from qwen_vl_utils import process_vision_info
 
 from prompts import get_prompts
 from dataset import get_archive_loader
-from config import get_default_config
+from configuration import get_default_config
 from utils import get_image_transform
 
 def generate_captions(cfg, **kwargs):
@@ -16,6 +17,7 @@ def generate_captions(cfg, **kwargs):
     image_size = kwargs.get('image_size',cfg['IMAGE_SIZE'])
     mean = kwargs.get('mean',cfg['MEAN'])
     std = kwargs.get('std',cfg['STD'])
+    device = torch.device(f"cuda:{kwargs['device']}") if kwargs.get('device') is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     temperature = kwargs.get('temperature', cfg['TEXT-GENERATION']['GLOBAL']['TEMPERATURE'])
     top_p = kwargs.get('top_p', cfg['TEXT-GENERATION']['GLOBAL']['TOP_P'])
@@ -27,10 +29,15 @@ def generate_captions(cfg, **kwargs):
                                     top_k=llm_top_k,
                                     max_new_tokens=max_new_tokens
                                 )
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        "Qwen/Qwen2.5-VL-7B-Instruct", torch_dtype="auto", device_map="auto"
-    )
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct")
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained('Qwen/Qwen2.5-VL-7B-Instruct', 
+                                                                torch_dtype=torch.bfloat16, 
+                                                                device_map={"": device}, 
+                                                                attn_implementation='flash_attention_2'
+                                                                ).to(device)
+    model.eval()
+    processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct",
+                                              use_fast=True,
+                                              padding_side='left')
 
     img_transform = get_image_transform(image_size, mean, std)
     dataloader = get_archive_loader(image_folder=image_folder, anno_folder=anno_folder, batch_size=batch_size, transform=img_transform)
@@ -48,7 +55,8 @@ def generate_captions(cfg, **kwargs):
             videos=video_inputs,
             padding=True,
             return_tensors="pt",
-        ).to("cuda")
+            padding_side='left'
+        ).to(model.device)
 
         generated_ids = model.generate(**inputs, generation_config=gen_config)
         generated_ids_trimmed = [

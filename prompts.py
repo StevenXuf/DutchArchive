@@ -13,6 +13,19 @@ def get_prompts(image):
     base64_image = convert_pil_to_base64(image)
     message = [
         {
+            "role": "system", 
+            "content": 
+            """
+                You are an historian good at describing historical images. 
+                Given a historical image, observe the image and connect the image with the historical background indicated by the image. 
+                Describe the image in accurate and detailed manner and distinguish as much historical information as possible, including events, persons, sourrounding environment, and possibly related historical background. 
+                For example, if the image has a well-known celebrity, you should distinguish the person.
+                If the image has a well-known place, you should distinguish the place.
+                If the image has a well-known event, you should distinguish the event.
+                Write 1 to 3 coherent and complete sentences in English.
+            """
+        },
+        {
             "role": "user",
             "content": [
                 {
@@ -21,9 +34,9 @@ def get_prompts(image):
                 },
                 {"type": "text", 
                 "text": """
-                    Describe the image in accurate and detailed manner and distinguish as much historical information as possible, including events, persons, sourrounding environment, and possibly related historical background. 
-                    Use no more than 100 words in English.
-                    Only output your description.
+                    Format your description in a complete, structured way.
+                    Only output your description in 1 to 3 complete sentences.
+                    Now describe the given image.
                 """
                 },
             ],
