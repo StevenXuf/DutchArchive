@@ -1,83 +1,69 @@
-import os
-import glob
-import pandas as pd
-import torch
+import fire
 
-from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor, GenerationConfig, set_seed
+from qwen_vl_utils import process_vision_info
 
-from utils import get_default_config, get_image_transform
+from prompts import get_prompts
+from dataset import get_archive_loader
+from config import get_default_config
+from utils import get_image_transform
 
-class ArchiveDataset(Dataset):
-    def __init__(self, image_folder, anno_folder):
-        # Load all CSV files in the folder
-        self.image_folder = image_folder
-        self.anno_folder = anno_folder
-        all_files = glob.glob(os.path.join(self.anno_folder, "*.csv"))
-        dataframes = []
+def generate_captions(cfg, **kwargs):
+    image_folder = kwargs.get('image_folder',cfg['IMAGE_FOLDER'])
+    anno_folder = kwargs.get('anno_folder',cfg['ANNOTATION_FOLDER'])
+    batch_size = kwargs.get('batch_size',cfg['BATCH_SIZE'])
+    image_size = kwargs.get('image_size',cfg['IMAGE_SIZE'])
+    mean = kwargs.get('mean',cfg['MEAN'])
+    std = kwargs.get('std',cfg['STD'])
 
-        for file in all_files:
-            df = pd.read_csv(file)
-
-            # Drop rows with missing or empty 'image' or 'description'
-            df = df.dropna(subset=['photo_id', 'description'])
-            df = df[(df['photo_id'].astype(str).str.strip() != '') & 
-                    (df['description'].astype(str).str.strip() != '')]
-            df['photo_path'] = df["photo_id"].apply(lambda x: os.path.join(self.image_folder, x[:2], x[2:4], f'{x}.jpg'))
-            df = df[df["photo_path"].apply(os.path.exists)].reset_index(drop=True)
-            dataframes.append(df)
-
-        # Combine all CSVs into one DataFrame
-        self.data = pd.concat(dataframes, ignore_index=True)
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        row = self.data.iloc[idx]
-        image_id = row['photo_id']
-        image_path = row['photo_path']
-        pil_image = Image.open(image_path).convert('RGB').resize((224, 224), Image.Resampling.BICUBIC)
-        description = row['description']
-
-        return {
-            'image': pil_image,
-            'image_id': image_id,
-            'image_path': image_path,
-            'caption': description
-        }
-    
-def get_archive_loader(image_folder, anno_folder, batch_size=16, num_workers=0, shuffle=True, transform=None):
-    collate_fn = lambda batch:{
-        'image': torch.stack([transform(item['image']) if transform is not None else item['image'] for item in batch]),
-        'pil_image': [item['image'] for item in batch],
-        'image_id': [item['image_id'] for item in batch],
-        'caption': [item['caption'] for item in batch]
-    }
-
-    dataset = ArchiveDataset(image_folder=image_folder, anno_folder=anno_folder)
-    loader = DataLoader(dataset, 
-                        batch_size=batch_size, 
-                        shuffle=shuffle, 
-                        pin_memory=True,
-                        num_workers=num_workers,
-                        collate_fn=collate_fn
+    temperature = kwargs.get('temperature', cfg['TEXT-GENERATION']['GLOBAL']['TEMPERATURE'])
+    top_p = kwargs.get('top_p', cfg['TEXT-GENERATION']['GLOBAL']['TOP_P'])
+    llm_top_k = kwargs.get('llm_top_k', cfg['TEXT-GENERATION']['GLOBAL']['TOP_K'])
+    max_new_tokens = kwargs.get('max_new_tokens', cfg['TEXT-GENERATION']['GLOBAL']['MAX_NEW_TOKENS'])
+    gen_config = GenerationConfig(do_sample=True,
+                                    temperature=temperature,
+                                    top_p=top_p,
+                                    top_k=llm_top_k,
+                                    max_new_tokens=max_new_tokens
+                                )
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        "Qwen/Qwen2.5-VL-7B-Instruct", torch_dtype="auto", device_map="auto"
     )
-    return loader
+    processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct")
 
-
-if __name__ == "__main__":
-    cfg = get_default_config()
-    image_folder = cfg['IMAGE_FOLDER']
-    anno_folder = cfg['ANNOTATION_FOLDER']
-    batch_size = cfg['BATCH_SIZE']
-    image_size = cfg['IMAGE_SIZE']
-    mean = cfg['MEAN']
-    std = cfg['STD']
     img_transform = get_image_transform(image_size, mean, std)
-    data_loader = get_archive_loader(image_folder=image_folder, anno_folder=anno_folder, batch_size=batch_size, transform=img_transform)
+    dataloader = get_archive_loader(image_folder=image_folder, anno_folder=anno_folder, batch_size=batch_size, transform=img_transform)
 
-    for batch in data_loader:
-        image = batch['image']
-        print(image.size())
-        break
+    for i,batch in enumerate(tqdm(dataloader)):
+        messages = [get_prompts(image) for image in batch['pil_image']]
+
+        text = [processor.apply_chat_template(
+            msg, tokenize=False, add_generation_prompt=True
+        ) for msg in messages]
+        image_inputs, video_inputs = process_vision_info(messages)
+        inputs = processor(
+            text=text,
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        ).to("cuda")
+
+        generated_ids = model.generate(**inputs, generation_config=gen_config)
+        generated_ids_trimmed = [
+            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+        output_text = processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+        print(output_text)
+
+def main(**kwargs):
+    cfg = get_default_config("config.yaml")
+    seed = kwargs.get('seed', cfg['SEED'])
+    set_seed(seed)
+    generate_captions(cfg, **kwargs)
+
+if __name__ == '__main__':
+    fire.Fire(main)
