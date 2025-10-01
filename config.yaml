@@ -1,4 +1,6 @@
-IMAGE_FOLDER: ""
-ANNOTATION_FOLDER: ""
+IMAGE_FOLDER: "/Volumes/T7/NA/downloaded_photos"
+ANNOTATION_FOLDER: "/Volumes/T7/NA/dutch_archives_analysis"
 IMAGE_SIZE: 224
 BATCH_SIZE: 32
+MEAN: [0.485, 0.456, 0.406]
+STD: [0.229, 0.224, 0.225]
