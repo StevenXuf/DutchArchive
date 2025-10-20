@@ -1,8 +1,9 @@
 import fire
 import torch
+import json
 
 from tqdm import tqdm
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor, GenerationConfig, set_seed
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, GenerationConfig, set_seed
 from qwen_vl_utils import process_vision_info
 
 from prompts import get_prompts
@@ -42,7 +43,9 @@ def generate_captions(cfg, **kwargs):
     img_transform = get_image_transform(image_size, mean, std)
     dataloader = get_archive_loader(image_folder=image_folder, anno_folder=anno_folder, batch_size=batch_size, transform=img_transform)
 
+    res = []
     for i,batch in enumerate(tqdm(dataloader)):
+        img_ids = batch['image_id']
         messages = [get_prompts(image) for image in batch['pil_image']]
 
         text = [processor.apply_chat_template(
@@ -66,7 +69,9 @@ def generate_captions(cfg, **kwargs):
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
         print(output_text)
+        res.extend(list(zip(img_ids, output_text)))
 
+    json.dump(res, open('generated_caption_for_dutch_archives.json', 'w'))
 def main(**kwargs):
     cfg = get_default_config("config.yaml")
     seed = kwargs.get('seed', cfg['SEED'])

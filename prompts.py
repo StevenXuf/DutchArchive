@@ -37,6 +37,7 @@ def get_prompts(image):
                     Format your description in a complete, structured way.
                     Only output your description in 1 to 3 complete sentences.
                     Now describe the given image.
+                    Justify your description with the image.
                 """
                 },
             ],
