@@ -1,5 +1,5 @@
-IMAGE_FOLDER: "/data/data_fxu/DutchArchive/images"
-ANNOTATION_FOLDER: "/data/data_fxu/DutchArchive/annotations"
+IMAGE_FOLDER: "/DutchArchive/images"
+ANNOTATION_FOLDER: "/DutchArchive/annotations"
 IMAGE_SIZE: 224
 BATCH_SIZE: 32
 MEAN: [0.485, 0.456, 0.406]
